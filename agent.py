@@ -3,21 +3,23 @@ import random
 import numpy as np
 from collections import deque
 from game import SnakeGameAI, Direction, Point
+from model import Linear_QNet, QTrainer
+from helper import plot
 
 MAX_MEMORY = 100_000
 BATCH_SIZE = 1000
 LR = 0.001
 
-class DQNAgent:
+
+class Agent:
     def __init__(self):
-        self.n_games = 0 # no. of games
-        self.epsilon = 0 # randomness
-        self.gamma = 0 # discount rate
-        self.memory = deque(maxlen=MAX_MEMORY) # popleft()
-        self.model = None
-        self.trainer = None
-        # TODO: model, trainer    
-    
+        self.n_games = 0  # no. of games
+        self.epsilon = 0  # randomness
+        self.gamma = 0.9  # discount rate
+        self.memory = deque(maxlen=MAX_MEMORY)  # popleft()
+        self.model = Linear_QNet(11, 256, 3)
+        self.trainer = QTrainer(self.model, lr=LR, gamma=self.gamma)
+
     def get_state(self, game):
         head = game.snake[0]
         point_l = Point(head.x - 20, head.y)
@@ -32,22 +34,22 @@ class DQNAgent:
 
         state = [
             # Danger straight
-            (dir_r and game.is_collison(point_r)) or
-            (dir_l and game.is_collison(point_l)) or
-            (dir_u and game.is_collison(point_u)) or
-            (dir_d and game.is_collison(point_d)),
+            (dir_r and game.is_collision(point_r)) or
+            (dir_l and game.is_collision(point_l)) or
+            (dir_u and game.is_collision(point_u)) or
+            (dir_d and game.is_collision(point_d)),
 
             # Danger right
-            (dir_u and game.is_collison(point_r)) or
-            (dir_d and game.is_collison(point_l)) or
-            (dir_l and game.is_collison(point_u)) or
-            (dir_r and game.is_collison(point_d)),
+            (dir_u and game.is_collision(point_r)) or
+            (dir_d and game.is_collision(point_l)) or
+            (dir_l and game.is_collision(point_u)) or
+            (dir_r and game.is_collision(point_d)),
 
             # Danger left
-            (dir_d and game.is_collison(point_r)) or
-            (dir_u and game.is_collison(point_l)) or
-            (dir_r and game.is_collison(point_u)) or
-            (dir_l and game.is_collison(point_d)),
+            (dir_d and game.is_collision(point_r)) or
+            (dir_u and game.is_collision(point_l)) or
+            (dir_r and game.is_collision(point_u)) or
+            (dir_l and game.is_collision(point_d)),
 
             # Move direction
             dir_l,
@@ -56,20 +58,20 @@ class DQNAgent:
             dir_d,
 
             # Food location
-            game.food.x < game.head.x, # food left
-            game.food.x > game.head.x, # food right
-            game.food.y < game.head.x, # food up
-            game.food.y > game.head.x, # food down
+            game.food.x < game.head.x,  # food left
+            game.food.x > game.head.x,  # food right
+            game.food.y < game.head.y,  # food up
+            game.food.y > game.head.y,  # food down
         ]
 
         return np.array(state, dtype=int)
 
     def remember(self, state, action, reward, next_state, done):
-        self.memory.append((state, action, reward, next_state, done)) # popleft() if MAX_MEMORY is reached)
+        self.memory.append((state, action, reward, next_state, done)) # popleft() if MAX_MEMORY is reached
 
     def train_long_memory(self):
         if len(self.memory) > BATCH_SIZE:
-            mini_sample = random.sample(self.memory, BATCH_SIZE) # list of tuples 
+            mini_sample = random.sample(self.memory, BATCH_SIZE)  # list of tuples
         else:
             mini_sample = self.memory
 
@@ -88,18 +90,19 @@ class DQNAgent:
             final_move[move] = 1
         else:
             state0 = torch.tensor(state, dtype=torch.float)
-            prediction = self.model.predict(state0)
+            prediction = self.model(state0)
             move = torch.argmax(prediction).item()
             final_move[move] = 1
-        
+
         return final_move
+
 
 def train():
     plot_scores = []
     plot_mean_scores = []
     total_score = 0
     record = 0
-    agent = DQNAgent()
+    agent = Agent()
     game = SnakeGameAI()
     while True:
         # get the current state
@@ -112,7 +115,7 @@ def train():
         reward, done, score = game.play_step(final_move)
         state_new = agent.get_state(game)
 
-        # trian short memory
+        # train short memory
         agent.train_short_memory(state_current, final_move, reward, state_new, done)
 
         # remember
@@ -126,10 +129,15 @@ def train():
 
             if score > record:
                 record = score
-                # TODO: agent.model.save()
+                agent.model.save()
 
             print(f'Game: {agent.n_games}, Score: {score}, Record: {record}')
-            # TODO: plot()
+
+            plot_scores.append(score)
+            total_score += score
+            mean_score = total_score / agent.n_games
+            plot_mean_scores.append(mean_score)
+            plot(plot_scores, plot_mean_scores)
 
 
 if __name__ == '__main__':
